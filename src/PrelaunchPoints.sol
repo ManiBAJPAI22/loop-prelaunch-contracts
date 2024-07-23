@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/utils/math/Math.sol";
 import {ILpETH, IERC20} from "./interfaces/ILpETH.sol";
 import {ILpETHVault} from "./interfaces/ILpETHVault.sol";
 import {IWETH} from "./interfaces/IWETH.sol";
+import {IMetaAggregationRouterV2} from "./interfaces/IMetaAggregationRouterV2.sol";
 
 /**
  * @title   PrelaunchPoints
@@ -33,15 +34,16 @@ contract PrelaunchPoints {
 
     uint256 public totalSupply;
     uint256 public totalLpETH;
+    mapping(address => uint256) public maxDepositCap;
     mapping(address => bool) public isTokenAllowed;
 
     enum Exchange {
-        UniswapV3,
-        TransformERC20
+        Swap,
+        SwapSimpleMode
     }
 
-    bytes4 public constant UNI_SELECTOR = 0x803ba26d;
-    bytes4 public constant TRANSFORM_SELECTOR = 0x415565b0;
+    bytes4 public SWAP_SELECTOR = 0xe21fd0e9;
+    bytes4 public SWAP_SIMPLE_MODE_SELECTOR = 0x8af033fb;
 
     uint32 public loopActivation;
     uint32 public startClaimDate;
@@ -91,15 +93,21 @@ contract PrelaunchPoints {
     error CurrentlyNotPossible();
     error NoLongerPossible();
     error ReceiveDisabled();
+    error ArrayLenghtsDoNotMatch();
+    error MaxDepositCapReached(address token);
 
     /*//////////////////////////////////////////////////////////////
                              INITIALIZATION
     //////////////////////////////////////////////////////////////*/
     /**
      * @param _exchangeProxy address of the 0x protocol exchange proxy
+     * @param _wethAddress   address of WETH
      * @param _allowedTokens list of token addresses to allow for locking
+     * @param _initialMaxCap list of intial max deposit caps
+     * @dev _initialMaxCap[0] corresponds to WETH, and the rest corresponds to 
+     *      _allowedTokens in same order
      */
-    constructor(address _exchangeProxy, address _wethAddress, address[] memory _allowedTokens) {
+    constructor(address _exchangeProxy, address _wethAddress, address[] memory _allowedTokens, uint256[] memory _initialMaxCap) {
         owner = msg.sender;
         exchangeProxy = _exchangeProxy;
         WETH = IWETH(_wethAddress);
@@ -111,11 +119,13 @@ contract PrelaunchPoints {
         uint256 length = _allowedTokens.length;
         for (uint256 i = 0; i < length;) {
             isTokenAllowed[_allowedTokens[i]] = true;
+            _setDepositMaxCap(_allowedTokens[i], _initialMaxCap[i+1]);
             unchecked {
                 i++;
             }
         }
         isTokenAllowed[_wethAddress] = true;
+        _setDepositMaxCap(_wethAddress, _initialMaxCap[0]);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -183,11 +193,17 @@ contract PrelaunchPoints {
         }
         if (_token == ETH) {
             WETH.deposit{value: _amount}();
+            if (IERC20(WETH).balanceOf(address(this)) > maxDepositCap[_token]) {
+                revert MaxDepositCapReached(address(WETH));
+            }
             totalSupply += _amount;
             balances[_receiver][address(WETH)] += _amount;
         } else {
             if (!isTokenAllowed[_token]) {
                 revert TokenNotAllowed();
+            }
+            if (IERC20(_token).balanceOf(address(this)) + _amount > maxDepositCap[_token]) {
+                revert MaxDepositCapReached(_token);
             }
             IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
 
@@ -196,7 +212,6 @@ contract PrelaunchPoints {
             } 
             balances[_receiver][_token] += _amount;
         }
-
         emit Locked(_receiver, _amount, _token, _referral);
     }
 
@@ -378,6 +393,24 @@ contract PrelaunchPoints {
     }
 
     /**
+     * @param _tokens addresses of the tokens to change the max cap
+     * @param _amounts corresponding amounts of the tokens to change the max cap
+     */
+    function setDepositMaxCaps(address[] memory _tokens, uint256[] memory _amounts) external onlyAuthorized {
+        uint256 length = _tokens.length;
+        if(length != _amounts.length){
+            revert ArrayLenghtsDoNotMatch();
+        }
+        
+        for (uint256 i = 0; i < length;) {
+            _setDepositMaxCap(_tokens[i], _amounts[i]);
+            unchecked {
+                i++;
+            }
+        }
+    }
+
+    /**
      * @param _mode boolean to activate/deactivate the emergency mode
      * @dev On emergency mode all withdrawals are accepted at
      */
@@ -421,21 +454,17 @@ contract PrelaunchPoints {
         address recipient;
         bytes4 selector;
 
-        if (_exchange == Exchange.UniswapV3) {
-            (inputToken, outputToken, inputTokenAmount, recipient, selector) = _decodeUniswapV3Data(_data);
-            if (selector != UNI_SELECTOR) {
+        if (_exchange == Exchange.Swap) {
+            (inputToken, outputToken, inputTokenAmount, recipient, selector) = _decodeSwapTargetData(_data);
+            if (selector != SWAP_SELECTOR) {
                 revert WrongSelector(selector);
             }
-            // UniswapV3Feature.sellTokenForEthToUniswapV3(encodedPath, sellAmount, minBuyAmount, recipient) requires `encodedPath` to be a Uniswap-encoded path, where the last token is WETH
             if (outputToken != address(WETH)) {
                 revert WrongDataTokens(inputToken, outputToken);
             }
-            if (recipient != address(this)) {
-            revert WrongRecipient(recipient);
-        }
-        } else if (_exchange == Exchange.TransformERC20) {
-            (inputToken, outputToken, inputTokenAmount, selector) = _decodeTransformERC20Data(_data);
-            if (selector != TRANSFORM_SELECTOR) {
+        } else if (_exchange == Exchange.SwapSimpleMode){
+            (inputToken, outputToken, inputTokenAmount, selector) = _decodeSwapSimpleMode(_data);
+            if (selector != SWAP_SIMPLE_MODE_SELECTOR) {
                 revert WrongSelector(selector);
             }
             if (outputToken != address(WETH)) {
@@ -451,47 +480,51 @@ contract PrelaunchPoints {
         if (inputTokenAmount != _amount) {
             revert WrongDataAmount(inputTokenAmount);
         }
+        if (recipient != address(this)) {
+            revert WrongRecipient(address recipient);
+        }
         
     }
 
+
     /**
-     * @notice Decodes the data sent from 0x API when UniswapV3 is used
-     * @param _data      swap data from 0x API
+     * @notice Decodes the data sent from Kyber API when exchanges are used via swap function
+     * @param _data      swap data from Kyber API
      */
-    function _decodeUniswapV3Data(bytes calldata _data)
+    function _decodeSwapTargetData(bytes calldata _data)
         internal
         pure
         returns (address inputToken, address outputToken, uint256 inputTokenAmount, address recipient, bytes4 selector)
     {
-        uint256 encodedPathLength;
         assembly {
             let p := _data.offset
             selector := calldataload(p)
-            p := add(p, 36) // Data: selector 4 + lenght data 32
-            inputTokenAmount := calldataload(p)
-            recipient := calldataload(add(p, 64))
-            encodedPathLength := calldataload(add(p, 96)) // Get length of encodedPath (obtained through abi.encodePacked)
-            inputToken := shr(96, calldataload(add(p, 128))) // Shift to the Right with 24 zeroes (12 bytes = 96 bits) to get address
-            outputToken := shr(96, calldataload(add(p, add(encodedPathLength, 108)))) // Get last address of the hop
         }
+        (, , ,IMetaAggregationRouterV2.SwapDescriptionV2 memory desc,) = abi.decode(_data[36:], (address,address,bytes,IMetaAggregationRouterV2.SwapDescriptionV2,bytes));
+        inputToken = address(desc.srcToken);
+        outputToken = address(desc.dstToken);
+        recipient = desc.dstReceiver;
+        inputTokenAmount = desc.amount;
     }
 
-    /**
-     * @notice Decodes the data sent from 0x API when other exchanges are used via 0x TransformERC20 function
-     * @param _data      swap data from 0x API
+        /**
+     * @notice Decodes the data sent from Kyber API when exchanges are used via swapSimpleMode function
+     * @param _data      swap data from Kyber API
      */
-    function _decodeTransformERC20Data(bytes calldata _data)
+    function _decodeSwapSimpleMode(bytes calldata _data)
         internal
         pure
-        returns (address inputToken, address outputToken, uint256 inputTokenAmount, bytes4 selector)
+        returns (address inputToken, address outputToken, uint256 inputTokenAmount, address recipient, bytes4 selector)
     {
         assembly {
             let p := _data.offset
             selector := calldataload(p)
-            inputToken := calldataload(add(p, 4)) // Read slot, selector 4 bytes
-            outputToken := calldataload(add(p, 36)) // Read slot
-            inputTokenAmount := calldataload(add(p, 68)) // Read slot
         }
+        (, , ,IMetaAggregationRouterV2.SwapDescriptionV2 memory desc,) = abi.decode(_data[4:], (address,IMetaAggregationRouterV2.SwapDescriptionV2, bytes, bytes));
+        inputToken = address(desc.srcToken);
+        outputToken = address(desc.dstToken);
+        recipient = desc.dstReceiver;
+        inputTokenAmount = desc.amount;
     }
 
     /**
@@ -518,6 +551,18 @@ contract PrelaunchPoints {
         // Use our current buyToken balance to determine how much we've bought.
         boughtWETHAmount = WETH.balanceOf(address(this)) - boughtWETHAmount;
         emit SwappedTokens(address(_sellToken), _amount, boughtWETHAmount);
+    }
+
+        /**
+     * @param _token address of an authorized LRT token
+     * @param _token address of a wrapped LRT token
+     * @dev ONLY add wrapped LRT tokens. Contract not compatible with rebase tokens.
+     */
+    function _setDepositMaxCap(address _token, uint256 _amount) internal {
+        if(!isTokenAllowed[_token]) {
+            revert TokenNotAllowed();
+        }
+        maxDepositCap[_token] = _amount;
     }
 
     /*//////////////////////////////////////////////////////////////

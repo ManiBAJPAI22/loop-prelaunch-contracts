@@ -6,8 +6,7 @@ import "hardhat-tracer"
 
 import "dotenv/config"
 
-const RPC_URL =
-  process.env.MAINNET_RPC_URL || "https://ethereum-rpc.publicnode.com"
+const RPC_URL = process.env.SCROLL_RPC_URL || "https://rpc.scroll.io/"
 
 const config: HardhatUserConfig = {
   solidity: "0.8.20",

@@ -28,6 +28,7 @@ contract PrelaunchPointsTest is Test {
     address public constant ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
     address public WETH; //= 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address[] public allowedTokens;
+    uint256[] public initialMaxBalance;
 
     function setUp() public {
         lrt = new LRToken();
@@ -39,8 +40,10 @@ contract PrelaunchPointsTest is Test {
 
         address[] storage allowedTokens_ = allowedTokens;
         allowedTokens_.push(address(lrt));
+        initialMaxBalance.push(100); // WETH
+        initialMaxBalance.push(100); // LRT
 
-        prelaunchPoints = new PrelaunchPoints(EXCHANGE_PROXY, WETH, allowedTokens_);
+        prelaunchPoints = new PrelaunchPoints(EXCHANGE_PROXY, WETH, allowedTokens_, initialMaxBalance);
 
         lpETH = new MockLpETH();
         lpETHVault = new MockLpETHVault();
@@ -273,7 +276,7 @@ contract PrelaunchPointsTest is Test {
         prelaunchPoints.convertAllETH();
 
         vm.warp(prelaunchPoints.startClaimDate() + 1);
-        prelaunchPoints.claim(WETH, 100, PrelaunchPoints.Exchange.UniswapV3, emptydata);
+        prelaunchPoints.claim(WETH, 100, PrelaunchPoints.Exchange.Swap, emptydata);
 
         uint256 balanceLpETH = prelaunchPoints.totalLpETH() * lockAmount / prelaunchPoints.totalSupply();
 
@@ -305,7 +308,7 @@ contract PrelaunchPointsTest is Test {
         prelaunchPoints.convertAllETH();
 
         vm.warp(prelaunchPoints.startClaimDate() + 1);
-        prelaunchPoints.claim(WETH, 100, PrelaunchPoints.Exchange.UniswapV3, emptydata);
+        prelaunchPoints.claim(WETH, 100, PrelaunchPoints.Exchange.Swap, emptydata);
 
         uint256 balanceLpETH = prelaunchPoints.totalLpETH() * lockAmount / prelaunchPoints.totalSupply();
 
@@ -313,7 +316,7 @@ contract PrelaunchPointsTest is Test {
         assertEq(lpETH.balanceOf(address(this)), balanceLpETH);
 
         vm.prank(user1);
-        prelaunchPoints.claim(WETH, 100, PrelaunchPoints.Exchange.UniswapV3, emptydata);
+        prelaunchPoints.claim(WETH, 100, PrelaunchPoints.Exchange.Swap, emptydata);
         uint256 balanceLpETH1 = prelaunchPoints.totalLpETH() * lockAmount1 / prelaunchPoints.totalSupply();
 
         assertEq(prelaunchPoints.balances(user1, WETH), 0);
@@ -331,10 +334,10 @@ contract PrelaunchPointsTest is Test {
         prelaunchPoints.convertAllETH();
 
         vm.warp(prelaunchPoints.startClaimDate() + 1);
-        prelaunchPoints.claim(WETH, 100, PrelaunchPoints.Exchange.UniswapV3, emptydata);
+        prelaunchPoints.claim(WETH, 100, PrelaunchPoints.Exchange.Swap, emptydata);
 
         vm.expectRevert(PrelaunchPoints.NothingToClaim.selector);
-        prelaunchPoints.claim(WETH, 100, PrelaunchPoints.Exchange.UniswapV3, emptydata);
+        prelaunchPoints.claim(WETH, 100, PrelaunchPoints.Exchange.Swap, emptydata);
     }
 
     function testClaimFailBeforeConvert(uint256 lockAmount) public {
@@ -347,7 +350,7 @@ contract PrelaunchPointsTest is Test {
         vm.warp(prelaunchPoints.loopActivation() + prelaunchPoints.TIMELOCK() + 1);
 
         vm.expectRevert(PrelaunchPoints.CurrentlyNotPossible.selector);
-        prelaunchPoints.claim(WETH, 100, PrelaunchPoints.Exchange.UniswapV3, emptydata);
+        prelaunchPoints.claim(WETH, 100, PrelaunchPoints.Exchange.Swap, emptydata);
     }
 
     /// ======= Tests for claimAndStake ======= ///
@@ -362,7 +365,7 @@ contract PrelaunchPointsTest is Test {
         prelaunchPoints.convertAllETH();
 
         vm.warp(prelaunchPoints.startClaimDate() + 1);
-        prelaunchPoints.claimAndStake(WETH, 100, PrelaunchPoints.Exchange.UniswapV3, 0, emptydata);
+        prelaunchPoints.claimAndStake(WETH, 100, PrelaunchPoints.Exchange.Swap, 0, emptydata);
 
         uint256 balanceLpETH = prelaunchPoints.totalLpETH() * lockAmount / prelaunchPoints.totalSupply();
 
@@ -395,7 +398,7 @@ contract PrelaunchPointsTest is Test {
         prelaunchPoints.convertAllETH();
 
         vm.warp(prelaunchPoints.startClaimDate() + 1);
-        prelaunchPoints.claimAndStake(WETH, 100, PrelaunchPoints.Exchange.UniswapV3, 0, emptydata);
+        prelaunchPoints.claimAndStake(WETH, 100, PrelaunchPoints.Exchange.Swap, 0, emptydata);
 
         uint256 balanceLpETH = prelaunchPoints.totalLpETH() * lockAmount / prelaunchPoints.totalSupply();
 
@@ -404,7 +407,7 @@ contract PrelaunchPointsTest is Test {
         assertEq(lpETHVault.balanceOf(address(this)), balanceLpETH);
 
         vm.prank(user1);
-        prelaunchPoints.claimAndStake(WETH, 100, PrelaunchPoints.Exchange.UniswapV3, 0, emptydata);
+        prelaunchPoints.claimAndStake(WETH, 100, PrelaunchPoints.Exchange.Swap, 0, emptydata);
         uint256 balanceLpETH1 = prelaunchPoints.totalLpETH() * lockAmount1 / prelaunchPoints.totalSupply();
 
         assertEq(prelaunchPoints.balances(user1, WETH), 0);
@@ -423,10 +426,10 @@ contract PrelaunchPointsTest is Test {
         prelaunchPoints.convertAllETH();
 
         vm.warp(prelaunchPoints.startClaimDate() + 1);
-        prelaunchPoints.claim(WETH, 100, PrelaunchPoints.Exchange.UniswapV3, emptydata);
+        prelaunchPoints.claim(WETH, 100, PrelaunchPoints.Exchange.Swap, emptydata);
 
         vm.expectRevert(PrelaunchPoints.NothingToClaim.selector);
-        prelaunchPoints.claimAndStake(WETH, 100, PrelaunchPoints.Exchange.UniswapV3, 0, emptydata);
+        prelaunchPoints.claimAndStake(WETH, 100, PrelaunchPoints.Exchange.Swap, 0, emptydata);
     }
 
     function testClaimAndStakeFailBeforeConvert(uint256 lockAmount) public {
@@ -439,7 +442,7 @@ contract PrelaunchPointsTest is Test {
         vm.warp(prelaunchPoints.loopActivation() + prelaunchPoints.TIMELOCK() + 1);
 
         vm.expectRevert(PrelaunchPoints.CurrentlyNotPossible.selector);
-        prelaunchPoints.claimAndStake(WETH, 100, PrelaunchPoints.Exchange.UniswapV3, 0, emptydata);
+        prelaunchPoints.claimAndStake(WETH, 100, PrelaunchPoints.Exchange.Swap, 0, emptydata);
     }
 
     /// ======= Tests for withdraw ETH ======= ///

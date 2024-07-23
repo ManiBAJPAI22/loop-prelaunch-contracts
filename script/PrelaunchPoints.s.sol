@@ -10,6 +10,7 @@ contract PrelaunchPointsScript is Script {
     address public constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2; // Mainnet
     // address public constant WETH = 0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9; // Sepolia
     address[] public allowedTokens;
+    uint256[] public initialMaxDepositCaps;
 
     function setUp() public {}
 
@@ -19,6 +20,6 @@ contract PrelaunchPointsScript is Script {
         console.log("Deployer Account", deployer);
 
         vm.broadcast(privateKey);
-        new PrelaunchPoints(EXCHANGE_PROXY, WETH, allowedTokens);
+        new PrelaunchPoints(EXCHANGE_PROXY, WETH, allowedTokens, initialMaxDepositCaps);
     }
 }

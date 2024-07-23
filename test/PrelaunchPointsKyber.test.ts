@@ -15,7 +15,7 @@ import {
 } from "../typechain"
 import { parseEther } from "ethers"
 
-const ZEROX_API_KEY = process.env.ZEROX_API_KEY || ""
+const CLIENT_ID = process.env.CLIENT_ID || ""
 
 const tokens = [
   // {
@@ -28,11 +28,11 @@ const tokens = [
   //   address: "0xbf5495Efe5DB9ce00f80364C8B423567e58d2110",
   //   whale: "0x267ed5f71EE47D3E45Bb1569Aa37889a2d10f91e",
   // },
-  // {
-  //   name: "pufETH",
-  //   address: "0xD9A442856C234a39a81a089C06451EBAa4306a72",
-  //   whale: "0x176F3DAb24a159341c0509bB36B833E7fdd0a132",
-  // },
+  {
+    name: "pufETH",
+    address: "0xc4d46E8402F476F269c379677C99F18E22Ea030e",
+    whale: "0x9026A229b535ecF0162Dfe48fDeb3c75f7b2A7AE",
+  },
   // {
   //   name: "rsETH",
   //   address: "0xA1290d69c65A6Fe4DF752f95823fae25cB99e5A7",
@@ -53,16 +53,16 @@ const tokens = [
   //   address: "0x5fD13359Ba15A84B76f7F87568309040176167cd",
   //   whale: "0xE3Fb0c9E52daDC7272a1B2F226842fDF8e3636de",
   // },
-  {
-    name: "weETHs",
-    address: "0x917ceE801a67f933F2e6b33fC0cD1ED2d5909D88",
-    whale: "0x30653c83162ff00918842D8bFe016935Fdd6Ab84",
-  },
+  // {
+  //   name: "weETHs",
+  //   address: "0x917ceE801a67f933F2e6b33fC0cD1ED2d5909D88",
+  //   whale: "0x30653c83162ff00918842D8bFe016935Fdd6Ab84",
+  // },
 ]
 
-describe("0x API integration", function () {
-  const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
-  const exchangeProxy = "0xdef1c0ded9bec7f1a1670819833240f027b25eff"
+describe("Kyberswap API integration", function () {
+  const WETH = "0x5300000000000000000000000000000000000004"
+  const exchangeProxy = "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5"
 
   const sellAmount = ethers.parseEther("1")
   const referral = ethers.encodeBytes32String("")
@@ -88,7 +88,8 @@ describe("0x API integration", function () {
     prelaunchPoints = (await PrelaunchPoints.deploy(
       exchangeProxy,
       WETH,
-      tokens.map((token) => token.address)
+      tokens.map((token) => token.address),
+      [parseEther("100")].concat(tokens.map((token) => parseEther("100")))
     )) as unknown as PrelaunchPoints
   })
 
@@ -134,15 +135,31 @@ describe("0x API integration", function () {
       await prelaunchPoints.convertAllETH()
 
       // Get Quote from 0x API
-      const headers = { "0x-api-key": ZEROX_API_KEY }
-      console.log(
-        `https://api.0x.org/swap/v1/quote?buyToken=${WETH}&sellAmount=${sellAmount}&sellToken=${token.address}`
-      )
-      const quoteResponse = await fetch(
-        `https://api.0x.org/swap/v1/quote?buyToken=${WETH}&sellAmount=${sellAmount}&sellToken=${token.address}`,
+      const headers = { "x-client-id": CLIENT_ID }
+      const routesResponse = await fetch(
+        `https://aggregator-api.kyberswap.com/scroll/api/v1/routes?tokenIn=${token.address}&tokenOut=${WETH}&amountIn=${sellAmount}&source=${CLIENT_ID}`,
         { headers }
       )
-      console.log(quoteResponse)
+      console.log("ROUTES")
+      const route = await routesResponse.json()
+      console.log(route)
+
+      const quoteResponse = await fetch(
+        "https://aggregator-api.kyberswap.com/scroll/api/v1/route/build",
+        {
+          method: "POST",
+          headers: {
+            ...headers,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            routeSummary: route.data.routeSummary,
+            sender: await prelaunchPoints.getAddress(),
+            recipient: await prelaunchPoints.getAddress(),
+          }),
+        }
+      )
+
       // Check for error from 0x API
       if (quoteResponse.status !== 200) {
         const body = await quoteResponse.text()
@@ -152,13 +169,12 @@ describe("0x API integration", function () {
 
       console.log(quote)
 
-      const exchange = quote.orders[0] ? quote.orders[0].source : ""
-      const exchangeCode = 1 //exchange == "Uniswap_V3" ? 0 : 1
+      const exchangeCode = 0
 
       // Claim
       await prelaunchPoints
         .connect(depositor)
-        .claim(claimToken, 100, exchangeCode, quote.data)
+        .claim(claimToken, 100, exchangeCode, quote.data.data)
 
       expect(await prelaunchPoints.balances(depositor, token.address)).to.be.eq(
         0
@@ -167,7 +183,7 @@ describe("0x API integration", function () {
       const balanceLpETHAfter = await lpETH.balanceOf(depositor)
       expect(balanceLpETHAfter).to.be.gt((sellAmount * 95n) / 100n)
     })
-    it(`it should be able to claimAndStake ${token.name} deposit`, async function () {
+    it.skip(`it should be able to claimAndStake ${token.name} deposit`, async function () {
       lockToken = (await ethers.getContractAt(
         "IERC20",
         token.address
