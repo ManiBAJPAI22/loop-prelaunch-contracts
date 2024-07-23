@@ -463,7 +463,7 @@ contract PrelaunchPoints {
                 revert WrongDataTokens(inputToken, outputToken);
             }
         } else if (_exchange == Exchange.SwapSimpleMode){
-            (inputToken, outputToken, inputTokenAmount, selector) = _decodeSwapSimpleMode(_data);
+            (inputToken, outputToken, inputTokenAmount, recipient, selector) = _decodeSwapSimpleMode(_data);
             if (selector != SWAP_SIMPLE_MODE_SELECTOR) {
                 revert WrongSelector(selector);
             }
@@ -481,7 +481,7 @@ contract PrelaunchPoints {
             revert WrongDataAmount(inputTokenAmount);
         }
         if (recipient != address(this)) {
-            revert WrongRecipient(address recipient);
+            revert WrongRecipient(recipient);
         }
         
     }
@@ -520,7 +520,7 @@ contract PrelaunchPoints {
             let p := _data.offset
             selector := calldataload(p)
         }
-        (, , ,IMetaAggregationRouterV2.SwapDescriptionV2 memory desc,) = abi.decode(_data[4:], (address,IMetaAggregationRouterV2.SwapDescriptionV2, bytes, bytes));
+        (,IMetaAggregationRouterV2.SwapDescriptionV2 memory desc, ,) = abi.decode(_data[4:], (address,IMetaAggregationRouterV2.SwapDescriptionV2, bytes, bytes));
         inputToken = address(desc.srcToken);
         outputToken = address(desc.dstToken);
         recipient = desc.dstReceiver;
