@@ -120,7 +120,7 @@ contract PrelaunchPointsTest is Test {
 
         assertEq(prelaunchPoints.balances(address(this), address(lrt)), lockAmount);
     }
-    
+
     function testLockWETH(uint256 lockAmount) public {
         lockAmount = bound(lockAmount, 1, INITIAL_SUPPLY);
         weth.approve(address(prelaunchPoints), lockAmount);

@@ -104,10 +104,15 @@ contract PrelaunchPoints {
      * @param _wethAddress   address of WETH
      * @param _allowedTokens list of token addresses to allow for locking
      * @param _initialMaxCap list of intial max deposit caps
-     * @dev _initialMaxCap[0] corresponds to WETH, and the rest corresponds to 
+     * @dev _initialMaxCap[0] corresponds to WETH, and the rest corresponds to
      *      _allowedTokens in same order
      */
-    constructor(address _exchangeProxy, address _wethAddress, address[] memory _allowedTokens, uint256[] memory _initialMaxCap) {
+    constructor(
+        address _exchangeProxy,
+        address _wethAddress,
+        address[] memory _allowedTokens,
+        uint256[] memory _initialMaxCap
+    ) {
         owner = msg.sender;
         exchangeProxy = _exchangeProxy;
         WETH = IWETH(_wethAddress);
@@ -119,7 +124,7 @@ contract PrelaunchPoints {
         uint256 length = _allowedTokens.length;
         for (uint256 i = 0; i < length;) {
             isTokenAllowed[_allowedTokens[i]] = true;
-            _setDepositMaxCap(_allowedTokens[i], _initialMaxCap[i+1]);
+            _setDepositMaxCap(_allowedTokens[i], _initialMaxCap[i + 1]);
             unchecked {
                 i++;
             }
@@ -209,7 +214,7 @@ contract PrelaunchPoints {
 
             if (_token == address(WETH)) {
                 totalSupply += _amount;
-            } 
+            }
             balances[_receiver][_token] += _amount;
         }
         emit Locked(_receiver, _amount, _token, _referral);
@@ -242,10 +247,13 @@ contract PrelaunchPoints {
      * @param _typeIndex  lock type index determining lock period and rewards multiplier.
      * @param _data       Swap data obtained from 0x API
      */
-    function claimAndStake(address _token, uint8 _percentage, Exchange _exchange, uint256 _typeIndex, bytes calldata _data)
-        external
-        onlyAfterDate(startClaimDate)
-    {
+    function claimAndStake(
+        address _token,
+        uint8 _percentage,
+        Exchange _exchange,
+        uint256 _typeIndex,
+        bytes calldata _data
+    ) external onlyAfterDate(startClaimDate) {
         uint256 claimedAmount = _claim(_token, address(this), _percentage, _exchange, _data);
         lpETH.approve(address(lpETHVault), claimedAmount);
         lpETHVault.stake(claimedAmount, msg.sender, _typeIndex);
@@ -270,9 +278,9 @@ contract PrelaunchPoints {
         if (_token == address(WETH)) {
             claimedAmount = userStake.mulDiv(totalLpETH, totalSupply);
             balances[msg.sender][_token] = 0;
-            if (_receiver != address(this)){
+            if (_receiver != address(this)) {
                 lpETH.safeTransfer(_receiver, claimedAmount);
-            }  
+            }
         } else {
             uint256 userClaim = userStake * _percentage / 100;
             _validateData(_token, userClaim, _exchange, _data);
@@ -310,7 +318,7 @@ contract PrelaunchPoints {
             revert CannotWithdrawZero();
         }
         if (_token == address(WETH)) {
-            if (block.timestamp >= startClaimDate){
+            if (block.timestamp >= startClaimDate) {
                 revert UseClaimInstead();
             }
             totalSupply -= lockedAmount;
@@ -355,7 +363,7 @@ contract PrelaunchPoints {
     }
 
     /**
-     * @notice Proposed owner accepts the ownership. 
+     * @notice Proposed owner accepts the ownership.
      * Can only be called by current proposed owner.
      */
     function acceptOwnership() external {
@@ -398,10 +406,10 @@ contract PrelaunchPoints {
      */
     function setDepositMaxCaps(address[] memory _tokens, uint256[] memory _amounts) external onlyAuthorized {
         uint256 length = _tokens.length;
-        if(length != _amounts.length){
+        if (length != _amounts.length) {
             revert ArrayLenghtsDoNotMatch();
         }
-        
+
         for (uint256 i = 0; i < length;) {
             _setDepositMaxCap(_tokens[i], _amounts[i]);
             unchecked {
@@ -459,16 +467,10 @@ contract PrelaunchPoints {
             if (selector != SWAP_SELECTOR) {
                 revert WrongSelector(selector);
             }
-            if (outputToken != address(WETH)) {
-                revert WrongDataTokens(inputToken, outputToken);
-            }
-        } else if (_exchange == Exchange.SwapSimpleMode){
+        } else if (_exchange == Exchange.SwapSimpleMode) {
             (inputToken, outputToken, inputTokenAmount, recipient, selector) = _decodeSwapSimpleMode(_data);
             if (selector != SWAP_SIMPLE_MODE_SELECTOR) {
                 revert WrongSelector(selector);
-            }
-            if (outputToken != address(WETH)) {
-                revert WrongDataTokens(inputToken, outputToken);
             }
         } else {
             revert WrongExchange();
@@ -477,15 +479,18 @@ contract PrelaunchPoints {
         if (inputToken != _token) {
             revert WrongDataTokens(inputToken, outputToken);
         }
+
+        if (outputToken != address(WETH)) {
+            revert WrongDataTokens(inputToken, outputToken);
+        }
+
         if (inputTokenAmount != _amount) {
             revert WrongDataAmount(inputTokenAmount);
         }
         if (recipient != address(this)) {
             revert WrongRecipient(recipient);
         }
-        
     }
-
 
     /**
      * @notice Decodes the data sent from Kyber API when exchanges are used via swap function
@@ -500,14 +505,15 @@ contract PrelaunchPoints {
             let p := _data.offset
             selector := calldataload(p)
         }
-        (, , ,IMetaAggregationRouterV2.SwapDescriptionV2 memory desc,) = abi.decode(_data[36:], (address,address,bytes,IMetaAggregationRouterV2.SwapDescriptionV2,bytes));
+        (,,, IMetaAggregationRouterV2.SwapDescriptionV2 memory desc,) =
+            abi.decode(_data[36:], (address, address, bytes, IMetaAggregationRouterV2.SwapDescriptionV2, bytes));
         inputToken = address(desc.srcToken);
         outputToken = address(desc.dstToken);
         recipient = desc.dstReceiver;
         inputTokenAmount = desc.amount;
     }
 
-        /**
+    /**
      * @notice Decodes the data sent from Kyber API when exchanges are used via swapSimpleMode function
      * @param _data      swap data from Kyber API
      */
@@ -520,7 +526,8 @@ contract PrelaunchPoints {
             let p := _data.offset
             selector := calldataload(p)
         }
-        (,IMetaAggregationRouterV2.SwapDescriptionV2 memory desc, ,) = abi.decode(_data[4:], (address,IMetaAggregationRouterV2.SwapDescriptionV2, bytes, bytes));
+        (, IMetaAggregationRouterV2.SwapDescriptionV2 memory desc,,) =
+            abi.decode(_data[4:], (address, IMetaAggregationRouterV2.SwapDescriptionV2, bytes, bytes));
         inputToken = address(desc.srcToken);
         outputToken = address(desc.dstToken);
         recipient = desc.dstReceiver;
@@ -533,7 +540,6 @@ contract PrelaunchPoints {
      * @param _amount       The `sellAmount` field from the API response.
      * @param _swapCallData  The `data` field from the API response.
      */
-
     function _fillQuote(IERC20 _sellToken, uint256 _amount, bytes calldata _swapCallData) internal {
         // Track our balance of the buyToken to determine how much we've bought.
         uint256 boughtWETHAmount = WETH.balanceOf(address(this));
@@ -553,13 +559,13 @@ contract PrelaunchPoints {
         emit SwappedTokens(address(_sellToken), _amount, boughtWETHAmount);
     }
 
-        /**
+    /**
      * @param _token address of an authorized LRT token
      * @param _token address of a wrapped LRT token
      * @dev ONLY add wrapped LRT tokens. Contract not compatible with rebase tokens.
      */
     function _setDepositMaxCap(address _token, uint256 _amount) internal {
-        if(!isTokenAllowed[_token]) {
+        if (!isTokenAllowed[_token]) {
             revert TokenNotAllowed();
         }
         maxDepositCap[_token] = _amount;
