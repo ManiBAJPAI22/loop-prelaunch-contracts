@@ -18,46 +18,26 @@ import { parseEther } from "ethers"
 const CLIENT_ID = process.env.CLIENT_ID || ""
 
 const tokens = [
-  // {
-  //   name: "weETH",
-  //   address: "0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee",
-  //   whale: "0x267ed5f71EE47D3E45Bb1569Aa37889a2d10f91e",
-  // },
-  // {
-  //   name: "ezETH",
-  //   address: "0xbf5495Efe5DB9ce00f80364C8B423567e58d2110",
-  //   whale: "0x267ed5f71EE47D3E45Bb1569Aa37889a2d10f91e",
-  // },
+  {
+    name: "weETH",
+    address: "0x01f0a31698C4d065659b9bdC21B3610292a1c506",
+    whale: "0xe67e43b831A541c5Fa40DE52aB0aFbE311514E64",
+  },
+  {
+    name: "STONE",
+    address: "0x80137510979822322193fc997d400d5a6c747bf7",
+    whale: "0x34669322bdfCa9e801CA334e7B0E6D69d1F87137",
+  },
   {
     name: "pufETH",
     address: "0xc4d46E8402F476F269c379677C99F18E22Ea030e",
     whale: "0x9026A229b535ecF0162Dfe48fDeb3c75f7b2A7AE",
   },
-  // {
-  //   name: "rsETH",
-  //   address: "0xA1290d69c65A6Fe4DF752f95823fae25cB99e5A7",
-  //   whale: "0x22162DbBa43fE0477cdC5234E248264eC7C6EA7c",
-  // },
-  // {
-  //   name: "rswETH",
-  //   address: "0xFAe103DC9cf190eD75350761e95403b7b8aFa6c0",
-  //   whale: "0x22162DbBa43fE0477cdC5234E248264eC7C6EA7c",
-  // },
-  // {
-  //   name: "uniETH",
-  //   address: "0xF1376bceF0f78459C0Ed0ba5ddce976F1ddF51F4",
-  //   whale: "0x934f719cd3fADeF7bB30E297F6687Ad978A076B7",
-  // },
-  // {
-  //   name: "amphrETH",
-  //   address: "0x5fD13359Ba15A84B76f7F87568309040176167cd",
-  //   whale: "0xE3Fb0c9E52daDC7272a1B2F226842fDF8e3636de",
-  // },
-  // {
-  //   name: "weETHs",
-  //   address: "0x917ceE801a67f933F2e6b33fC0cD1ED2d5909D88",
-  //   whale: "0x30653c83162ff00918842D8bFe016935Fdd6Ab84",
-  // },
+  {
+    name: "wrsETH",
+    address: "0xa25b25548B4C98B0c7d3d27dcA5D5ca743d68b7F",
+    whale: "0xbC37277871Ab83B83b6E77a8419aC5CBB78d5cf1",
+  },
 ]
 
 describe("Kyberswap API integration", function () {
@@ -134,15 +114,14 @@ describe("Kyberswap API integration", function () {
       await time.increaseTo(newTime)
       await prelaunchPoints.convertAllETH()
 
-      // Get Quote from 0x API
+      // Get Quote from Kyber API
       const headers = { "x-client-id": CLIENT_ID }
       const routesResponse = await fetch(
         `https://aggregator-api.kyberswap.com/scroll/api/v1/routes?tokenIn=${token.address}&tokenOut=${WETH}&amountIn=${sellAmount}&source=${CLIENT_ID}`,
         { headers }
       )
-      console.log("ROUTES")
       const route = await routesResponse.json()
-      console.log(route)
+      // console.log(route)
 
       const quoteResponse = await fetch(
         "https://aggregator-api.kyberswap.com/scroll/api/v1/route/build",
@@ -156,20 +135,23 @@ describe("Kyberswap API integration", function () {
             routeSummary: route.data.routeSummary,
             sender: await prelaunchPoints.getAddress(),
             recipient: await prelaunchPoints.getAddress(),
+            slippageTolerance: 1000, // 10%
+            deadline: Date.now() + 200000,
+            source: CLIENT_ID,
           }),
         }
       )
 
-      // Check for error from 0x API
+      // Check for error from Kyber API
       if (quoteResponse.status !== 200) {
         const body = await quoteResponse.text()
         throw new Error(body)
       }
       const quote = await quoteResponse.json()
 
-      console.log(quote)
-
-      const exchangeCode = 0
+      // console.log(quote)
+      const exchangeSelector = quote.data.data.slice(0, 10)
+      const exchangeCode = exchangeSelector == "0xe21fd0e9" ? 0 : 1
 
       // Claim
       await prelaunchPoints
@@ -183,7 +165,7 @@ describe("Kyberswap API integration", function () {
       const balanceLpETHAfter = await lpETH.balanceOf(depositor)
       expect(balanceLpETHAfter).to.be.gt((sellAmount * 95n) / 100n)
     })
-    it.skip(`it should be able to claimAndStake ${token.name} deposit`, async function () {
+    it(`it should be able to claimAndStake ${token.name} deposit`, async function () {
       lockToken = (await ethers.getContractAt(
         "IERC20",
         token.address
@@ -223,14 +205,35 @@ describe("Kyberswap API integration", function () {
       await time.increaseTo(newTime)
       await prelaunchPoints.convertAllETH()
 
-      // Get Quote from 0x API
-      const headers = { "0x-api-key": ZEROX_API_KEY }
-      const quoteResponse = await fetch(
-        `https://api.0x.org/swap/v1/quote?buyToken=${WETH}&sellAmount=${sellAmount}&sellToken=${token.address}`,
+      // Get Quote from Kyber API
+      const headers = { "x-client-id": CLIENT_ID }
+      const routesResponse = await fetch(
+        `https://aggregator-api.kyberswap.com/scroll/api/v1/routes?tokenIn=${token.address}&tokenOut=${WETH}&amountIn=${sellAmount}&source=${CLIENT_ID}`,
         { headers }
       )
+      const route = await routesResponse.json()
+      // console.log(route)
 
-      // Check for error from 0x API
+      const quoteResponse = await fetch(
+        "https://aggregator-api.kyberswap.com/scroll/api/v1/route/build",
+        {
+          method: "POST",
+          headers: {
+            ...headers,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            routeSummary: route.data.routeSummary,
+            sender: await prelaunchPoints.getAddress(),
+            recipient: await prelaunchPoints.getAddress(),
+            slippageTolerance: 1000, // 10%
+            deadline: Date.now() + 200000,
+            source: CLIENT_ID,
+          }),
+        }
+      )
+
+      // Check for error from Kyber API
       if (quoteResponse.status !== 200) {
         const body = await quoteResponse.text()
         throw new Error(body)
@@ -239,13 +242,13 @@ describe("Kyberswap API integration", function () {
 
       // console.log(quote)
 
-      const exchange = quote.orders[0] ? quote.orders[0].source : ""
-      const exchangeCode = 1 // exchange == "Uniswap_V3" ? 0 : 1
+      const exchangeSelector = quote.data.data.slice(0, 10)
+      const exchangeCode = exchangeSelector == "0xe21fd0e9" ? 0 : 1
 
       // Claim
       await prelaunchPoints
         .connect(depositor)
-        .claimAndStake(claimToken, 100, exchangeCode, 0, quote.data)
+        .claimAndStake(claimToken, 100, exchangeCode, 0, quote.data.data)
 
       expect(await prelaunchPoints.balances(depositor, token.address)).to.be.eq(
         0

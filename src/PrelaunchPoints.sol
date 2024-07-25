@@ -100,7 +100,7 @@ contract PrelaunchPoints {
                              INITIALIZATION
     //////////////////////////////////////////////////////////////*/
     /**
-     * @param _exchangeProxy address of the 0x protocol exchange proxy
+     * @param _exchangeProxy address of the Kyberswap protocol exchange proxy
      * @param _wethAddress   address of WETH
      * @param _allowedTokens list of token addresses to allow for locking
      * @param _initialMaxCap list of intial max deposit caps
@@ -122,6 +122,10 @@ contract PrelaunchPoints {
 
         // Allow intital list of tokens
         uint256 length = _allowedTokens.length;
+        if (_initialMaxCap.length != length + 1) {
+            revert ArrayLenghtsDoNotMatch();
+        }
+
         for (uint256 i = 0; i < length;) {
             isTokenAllowed[_allowedTokens[i]] = true;
             _setDepositMaxCap(_allowedTokens[i], _initialMaxCap[i + 1]);
@@ -198,7 +202,7 @@ contract PrelaunchPoints {
         }
         if (_token == ETH) {
             WETH.deposit{value: _amount}();
-            if (IERC20(WETH).balanceOf(address(this)) > maxDepositCap[_token]) {
+            if (IERC20(WETH).balanceOf(address(this)) > maxDepositCap[address(WETH)]) {
                 revert MaxDepositCapReached(address(WETH));
             }
             totalSupply += _amount;
@@ -229,7 +233,7 @@ contract PrelaunchPoints {
      * @param _token      Address of the token to convert to lpETH
      * @param _percentage Proportion in % of tokens to withdraw. NOT useful for ETH
      * @param _exchange   Exchange identifier where the swap takes place
-     * @param _data       Swap data obtained from 0x API
+     * @param _data       Swap data obtained from Kyberswap API
      */
     function claim(address _token, uint8 _percentage, Exchange _exchange, bytes calldata _data)
         external
@@ -245,7 +249,7 @@ contract PrelaunchPoints {
      * @param _percentage Proportion in % of tokens to withdraw. NOT useful for ETH
      * @param _exchange   Exchange identifier where the swap takes place
      * @param _typeIndex  lock type index determining lock period and rewards multiplier.
-     * @param _data       Swap data obtained from 0x API
+     * @param _data       Swap data obtained from Kyberswap API
      */
     function claimAndStake(
         address _token,
@@ -403,6 +407,7 @@ contract PrelaunchPoints {
     /**
      * @param _tokens addresses of the tokens to change the max cap
      * @param _amounts corresponding amounts of the tokens to change the max cap
+     * @dev tokens must be allowed to change the max deposit cap
      */
     function setDepositMaxCaps(address[] memory _tokens, uint256[] memory _amounts) external onlyAuthorized {
         uint256 length = _tokens.length;
@@ -449,11 +454,11 @@ contract PrelaunchPoints {
                             INTERNAL FUNCTIONS
     //////////////////////////////////////////////////////////////*/
     /**
-     * @notice Validates the data sent from 0x API to match desired behaviour
+     * @notice Validates the data sent from Kyberswap API to match desired behaviour
      * @param _token     address of the token to sell
      * @param _amount    amount of token to sell
      * @param _exchange  exchange identifier where the swap takes place
-     * @param _data      swap data from 0x API
+     * @param _data      swap data from Kyberswap API
      */
     function _validateData(address _token, uint256 _amount, Exchange _exchange, bytes calldata _data) internal view {
         address inputToken;
@@ -560,9 +565,8 @@ contract PrelaunchPoints {
     }
 
     /**
-     * @param _token address of an authorized LRT token
-     * @param _token address of a wrapped LRT token
-     * @dev ONLY add wrapped LRT tokens. Contract not compatible with rebase tokens.
+     * @param _token   address of an authorized token
+     * @param _amount  amount to set the max deposit cap for that token
      */
     function _setDepositMaxCap(address _token, uint256 _amount) internal {
         if (!isTokenAllowed[_token]) {

@@ -24,7 +24,7 @@ contract PrelaunchPointsTest is Test {
     uint256 public constant INITIAL_SUPPLY = 1000 ether;
     bytes32 referral = bytes32(uint256(1));
 
-    address constant EXCHANGE_PROXY = 0xDef1C0ded9bec7F1a1670819833240f027b25EfF;
+    address constant EXCHANGE_PROXY = 0x6131B5fae19EA4f9D964eAc0408E4408b66337b5;
     address public constant ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
     address public WETH; //= 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address[] public allowedTokens;
@@ -39,11 +39,12 @@ contract PrelaunchPointsTest is Test {
         weth.deposit{value: INITIAL_SUPPLY}();
 
         address[] storage allowedTokens_ = allowedTokens;
+        uint256[] storage initialMaxBalance_ = initialMaxBalance;
         allowedTokens_.push(address(lrt));
-        initialMaxBalance.push(100); // WETH
-        initialMaxBalance.push(100); // LRT
+        initialMaxBalance_.push(UINT256_MAX); // WETH
+        initialMaxBalance_.push(UINT256_MAX); // LRT
 
-        prelaunchPoints = new PrelaunchPoints(EXCHANGE_PROXY, WETH, allowedTokens_, initialMaxBalance);
+        prelaunchPoints = new PrelaunchPoints(EXCHANGE_PROXY, WETH, allowedTokens_, initialMaxBalance_);
 
         lpETH = new MockLpETH();
         lpETHVault = new MockLpETHVault();
@@ -79,6 +80,17 @@ contract PrelaunchPointsTest is Test {
         prelaunchPoints.lockETH{value: 0}(referral);
     }
 
+    function testLockETHFailMaxCap(uint256 lockAmount) public {
+        lockAmount = bound(lockAmount, 1, INITIAL_SUPPLY * 1e10);
+
+        _setLowerCaps(WETH, lockAmount - 1);
+
+        // Try to lock ETH
+        vm.deal(address(this), lockAmount);
+        vm.expectRevert(abi.encodeWithSelector(PrelaunchPoints.MaxDepositCapReached.selector, WETH));
+        prelaunchPoints.lockETH{value: lockAmount}(referral);
+    }
+
     /// ======= Tests for lockETHFor ======= ///
     function testLockETHFor(uint256 lockAmount) public {
         lockAmount = bound(lockAmount, 1, INITIAL_SUPPLY * 1e10);
@@ -110,6 +122,18 @@ contract PrelaunchPointsTest is Test {
 
         vm.expectRevert(PrelaunchPoints.CannotLockZero.selector);
         prelaunchPoints.lockETHFor{value: 0}(recipient, referral);
+    }
+
+    function testLockETHForFailMaxCap(uint256 lockAmount) public {
+        lockAmount = bound(lockAmount, 1, INITIAL_SUPPLY * 1e10);
+        address recipient = address(0x1234);
+
+        _setLowerCaps(WETH, lockAmount - 1);
+
+        // Try to lock ETH
+        vm.deal(address(this), lockAmount);
+        vm.expectRevert(abi.encodeWithSelector(PrelaunchPoints.MaxDepositCapReached.selector, WETH));
+        prelaunchPoints.lockETHFor{value: lockAmount}(recipient, referral);
     }
 
     /// ======= Tests for lock ======= ///
@@ -168,6 +192,28 @@ contract PrelaunchPointsTest is Test {
         lrt.approve(address(prelaunchPoints), lockAmount);
         vm.expectRevert(PrelaunchPoints.TokenNotAllowed.selector);
         prelaunchPoints.lock(address(lpETH), lockAmount, referral);
+    }
+
+    function testLockFailMaxCap(uint256 lockAmount) public {
+        lockAmount = bound(lockAmount, 1, INITIAL_SUPPLY);
+
+        _setLowerCaps(address(lrt), lockAmount - 1);
+
+        // Try to lock LRT
+        lrt.approve(address(prelaunchPoints), lockAmount);
+        vm.expectRevert(abi.encodeWithSelector(PrelaunchPoints.MaxDepositCapReached.selector, address(lrt)));
+        prelaunchPoints.lock(address(lrt), lockAmount, referral);
+    }
+
+    function testLockWETHFailMaxCap(uint256 lockAmount) public {
+        lockAmount = bound(lockAmount, 1, INITIAL_SUPPLY * 1e10);
+
+        _setLowerCaps(WETH, lockAmount - 1);
+
+        // Try to lock WETH
+        weth.approve(address(prelaunchPoints), lockAmount);
+        vm.expectRevert(abi.encodeWithSelector(PrelaunchPoints.MaxDepositCapReached.selector, WETH));
+        prelaunchPoints.lock(WETH, lockAmount, referral);
     }
 
     /// ======= Tests for lockFor ======= ///
@@ -233,6 +279,30 @@ contract PrelaunchPointsTest is Test {
 
         vm.expectRevert(PrelaunchPoints.TokenNotAllowed.selector);
         prelaunchPoints.lockFor(address(lpETH), lockAmount, recipient, referral);
+    }
+
+    function testLockForFailMaxCap(uint256 lockAmount) public {
+        lockAmount = bound(lockAmount, 1, INITIAL_SUPPLY);
+        address recipient = address(0x1234);
+
+        _setLowerCaps(address(lrt), lockAmount - 1);
+
+        // Try to lock LRT
+        lrt.approve(address(prelaunchPoints), lockAmount);
+        vm.expectRevert(abi.encodeWithSelector(PrelaunchPoints.MaxDepositCapReached.selector, address(lrt)));
+        prelaunchPoints.lockFor(address(lrt), lockAmount, recipient, referral);
+    }
+
+    function testLockForWETHFailMaxCap(uint256 lockAmount) public {
+        lockAmount = bound(lockAmount, 1, INITIAL_SUPPLY * 1e10);
+        address recipient = address(0x1234);
+
+        _setLowerCaps(WETH, lockAmount - 1);
+
+        // Try to lock WETH
+        weth.approve(address(prelaunchPoints), lockAmount);
+        vm.expectRevert(abi.encodeWithSelector(PrelaunchPoints.MaxDepositCapReached.selector, WETH));
+        prelaunchPoints.lockFor(WETH, lockAmount, recipient, referral);
     }
 
     /// ======= Tests for convertAllETH ======= ///
@@ -692,6 +762,47 @@ contract PrelaunchPointsTest is Test {
         prelaunchPoints.allowToken(ETH);
     }
 
+    /// ======= Tests for SetDepositMaxCaps ======= ///
+    function testSetDepositMaxCaps(uint256 amount0, uint256 amount1) public {
+        address[] memory allowedTokens_ = new address[](2);
+        uint256[] memory initialMaxBalance_ = new uint256[](2);
+        allowedTokens_[0] = WETH;
+        allowedTokens_[1] = address(lrt);
+        initialMaxBalance_[0] = amount0;
+        initialMaxBalance_[1] = amount1;
+
+        prelaunchPoints.setDepositMaxCaps(allowedTokens_, initialMaxBalance_);
+
+        assertEq(prelaunchPoints.maxDepositCap(WETH), amount0);
+        assertEq(prelaunchPoints.maxDepositCap(address(lrt)), amount1);
+    }
+
+    function testSetDepositMaxCapsNotAuthorized(uint256 amount0, uint256 amount1) public {
+        address[] memory allowedTokens_ = new address[](2);
+        uint256[] memory initialMaxBalance_ = new uint256[](2);
+        allowedTokens_[0] = WETH;
+        allowedTokens_[1] = address(lrt);
+        initialMaxBalance_[0] = amount0;
+        initialMaxBalance_[1] = amount1;
+
+        address user1 = vm.addr(1);
+        vm.prank(user1);
+        vm.expectRevert(PrelaunchPoints.NotAuthorized.selector);
+        prelaunchPoints.setDepositMaxCaps(allowedTokens_, initialMaxBalance_);
+    }
+
+    function testSetDepositMaxCapsTokenNotAllowed(uint256 amount0, uint256 amount1) public {
+        address[] memory allowedTokens_ = new address[](2);
+        uint256[] memory initialMaxBalance_ = new uint256[](2);
+        allowedTokens_[0] = WETH;
+        allowedTokens_[1] = address(0x12345);
+        initialMaxBalance_[0] = amount0;
+        initialMaxBalance_[1] = amount1;
+
+        vm.expectRevert(PrelaunchPoints.TokenNotAllowed.selector);
+        prelaunchPoints.setDepositMaxCaps(allowedTokens_, initialMaxBalance_);
+    }
+
     /// ======== Test for receive ETH ========= ///
     function testReceiveDirectEthFail() public {
         vm.deal(address(this), 1 ether);
@@ -729,5 +840,14 @@ contract PrelaunchPointsTest is Test {
         vm.prank(address(attackContract));
         vm.expectRevert();
         attackContract.attackClaim();
+    }
+
+    // HELPERS
+    function _setLowerCaps(address _token, uint256 _amount) internal {
+        address[] memory allowedTokens_ = new address[](1);
+        uint256[] memory initialMaxBalance_ = new uint256[](1);
+        allowedTokens_[0] = _token;
+        initialMaxBalance_[0] = _amount;
+        prelaunchPoints.setDepositMaxCaps(allowedTokens_, initialMaxBalance_);
     }
 }
