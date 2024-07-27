@@ -42,8 +42,8 @@ contract PrelaunchPoints {
         SwapSimpleMode
     }
 
-    bytes4 public SWAP_SELECTOR = 0xe21fd0e9;
-    bytes4 public SWAP_SIMPLE_MODE_SELECTOR = 0x8af033fb;
+    bytes4 public constant SWAP_SELECTOR = 0xe21fd0e9;
+    bytes4 public constant SWAP_SIMPLE_MODE_SELECTOR = 0x8af033fb;
 
     uint32 public loopActivation;
     uint32 public startClaimDate;
