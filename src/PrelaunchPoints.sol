@@ -66,6 +66,9 @@ contract PrelaunchPoints {
     event OwnerUpdated(address newOwner);
     event LoopAddressesUpdated(address loopAddress, address vaultAddress);
     event SwappedTokens(address sellToken, uint256 sellAmount, uint256 buyETHAmount);
+    event NewTokenAllowed(address token);
+    event DepositMaxCapUpdated(address indexed token, uint256 amount);
+    event EmergencyModeSet(bool mode);
 
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
@@ -402,6 +405,7 @@ contract PrelaunchPoints {
      */
     function allowToken(address _token) external onlyAuthorized {
         isTokenAllowed[_token] = true;
+        emit NewTokenAllowed(_token);
     }
 
     /**
@@ -417,6 +421,7 @@ contract PrelaunchPoints {
 
         for (uint256 i = 0; i < length;) {
             _setDepositMaxCap(_tokens[i], _amounts[i]);
+            emit DepositMaxCapUpdated(_tokens[i], _amounts[i]);
             unchecked {
                 i++;
             }
@@ -429,6 +434,7 @@ contract PrelaunchPoints {
      */
     function setEmergencyMode(bool _mode) external onlyAuthorized {
         emergencyMode = _mode;
+        emit EmergencyModeSet(_mode);
     }
 
     /**
