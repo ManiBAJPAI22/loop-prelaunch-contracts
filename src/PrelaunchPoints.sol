@@ -73,7 +73,7 @@ contract PrelaunchPoints {
 
     error InvalidToken();
     error NothingToClaim();
-    error TokenNotAllowed();
+    error TokenNotAllowed(address token);
     error CannotLockZero();
     error CannotClaimZero();
     error CannotWithdrawZero();
@@ -209,7 +209,7 @@ contract PrelaunchPoints {
             balances[_receiver][address(WETH)] += _amount;
         } else {
             if (!isTokenAllowed[_token]) {
-                revert TokenNotAllowed();
+                revert TokenNotAllowed(_token);
             }
             if (IERC20(_token).balanceOf(address(this)) + _amount > maxDepositCap[_token]) {
                 revert MaxDepositCapReached(_token);
@@ -570,7 +570,7 @@ contract PrelaunchPoints {
      */
     function _setDepositMaxCap(address _token, uint256 _amount) internal {
         if (!isTokenAllowed[_token]) {
-            revert TokenNotAllowed();
+            revert TokenNotAllowed(_token);
         }
         maxDepositCap[_token] = _amount;
     }

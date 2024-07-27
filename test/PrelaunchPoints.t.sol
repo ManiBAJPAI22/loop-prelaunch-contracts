@@ -190,7 +190,7 @@ contract PrelaunchPointsTest is Test {
     function testLockFailTokenNotAllowed(uint256 lockAmount) public {
         lockAmount = bound(lockAmount, 1, INITIAL_SUPPLY);
         lrt.approve(address(prelaunchPoints), lockAmount);
-        vm.expectRevert(PrelaunchPoints.TokenNotAllowed.selector);
+        vm.expectRevert(abi.encodeWithSelector(PrelaunchPoints.TokenNotAllowed.selector, address(lpETH)));
         prelaunchPoints.lock(address(lpETH), lockAmount, referral);
     }
 
@@ -277,7 +277,7 @@ contract PrelaunchPointsTest is Test {
         lrt.approve(address(prelaunchPoints), lockAmount);
         address recipient = address(0x1234);
 
-        vm.expectRevert(PrelaunchPoints.TokenNotAllowed.selector);
+        vm.expectRevert(abi.encodeWithSelector(PrelaunchPoints.TokenNotAllowed.selector, address(lpETH)));
         prelaunchPoints.lockFor(address(lpETH), lockAmount, recipient, referral);
     }
 
@@ -799,7 +799,7 @@ contract PrelaunchPointsTest is Test {
         initialMaxBalance_[0] = amount0;
         initialMaxBalance_[1] = amount1;
 
-        vm.expectRevert(PrelaunchPoints.TokenNotAllowed.selector);
+        vm.expectRevert(abi.encodeWithSelector(PrelaunchPoints.TokenNotAllowed.selector, address(0x12345)));
         prelaunchPoints.setDepositMaxCaps(allowedTokens_, initialMaxBalance_);
     }
 
