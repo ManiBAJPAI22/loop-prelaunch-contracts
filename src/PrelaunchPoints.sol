@@ -339,7 +339,7 @@ contract PrelaunchPoints {
      * @dev Called by a owner to convert all the locked ETH to get lpETH
      */
     function convertAllETH() external onlyAuthorized onlyBeforeDate(startClaimDate) {
-        if (block.timestamp - loopActivation <= TIMELOCK) {
+        if (block.timestamp <= TIMELOCK + loopActivation) {
             revert LoopNotActivated();
         }
 
