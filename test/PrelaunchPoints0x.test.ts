@@ -50,7 +50,7 @@ const tokens = [
   },
 ]
 
-describe("0x API integration", function () {
+describe("PrelaunchPoints", function () {
   const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
   const ETH = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
   const exchangeProxy = "0xdef1c0ded9bec7f1a1670819833240f027b25eff"
@@ -63,8 +63,14 @@ describe("0x API integration", function () {
   let prelaunchPoints: PrelaunchPoints
   let lpETH: MockLpETH
   let lpETHVault: MockLpETHVault
+  let owner: any
+  let user1: any
+  let user2: any
+  let attacker: any
 
   before(async () => {
+    [owner, user1, user2, attacker] = await ethers.getSigners()
+
     const LpETH = await hre.ethers.getContractFactory("MockLpETH")
     lpETH = (await LpETH.deploy()) as unknown as MockLpETH
 
@@ -81,6 +87,127 @@ describe("0x API integration", function () {
       WETH,
       tokens.map((token) => token.address)
     )) as unknown as PrelaunchPoints
+  })
+
+  describe("Initialization", function () {
+    it("should correctly set the owner", async function () {
+      expect(await prelaunchPoints.owner()).to.equal(owner.address)
+    })
+
+    it("should correctly set the WETH address", async function () {
+      expect(await prelaunchPoints.WETH()).to.equal(WETH)
+    })
+
+    it("should correctly set allowed tokens", async function () {
+      for (const token of tokens) {
+        expect(await prelaunchPoints.isTokenAllowed(token.address)).to.be.true
+      }
+    })
+  })
+
+  describe("Locking Tokens", function () {
+    it("should allow locking ETH", async function () {
+      const amount = ethers.parseEther("1")
+      await expect(prelaunchPoints.connect(user1).lockETH({ value: amount }))
+        .to.emit(prelaunchPoints, "Locked")
+        .withArgs(user1.address, amount, ETH, referral)
+
+      expect(await prelaunchPoints.balances(user1.address, WETH)).to.equal(amount)
+    })
+
+    it("should not allow locking disallowed tokens", async function () {
+      const DisallowedToken = await ethers.getContractFactory("MockToken")
+      const disallowedToken = await DisallowedToken.deploy("Disallowed", "DAT")
+
+      await expect(prelaunchPoints.connect(user1).lock(disallowedToken.address, 100, referral))
+        .to.be.revertedWith("TokenNotAllowed")
+    })
+  })
+
+  describe("Withdrawals", function () {
+    it("should allow withdrawing before conversion", async function () {
+      const amount = ethers.parseEther("1")
+      await prelaunchPoints.connect(user1).lockETH({ value: amount })
+
+      await expect(prelaunchPoints.connect(user1).withdraw(WETH))
+        .to.emit(prelaunchPoints, "Withdrawn")
+        .withArgs(user1.address, WETH, amount)
+
+      expect(await prelaunchPoints.balances(user1.address, WETH)).to.equal(0)
+    })
+
+    it("should not allow withdrawing after conversion", async function () {
+      const amount = ethers.parseEther("1")
+      await prelaunchPoints.connect(user1).lockETH({ value: amount })
+
+      await prelaunchPoints.setLoopAddresses(lpETH, lpETHVault)
+      await time.increase(await prelaunchPoints.TIMELOCK())
+      await prelaunchPoints.convertAllETH()
+
+      await expect(prelaunchPoints.connect(user1).withdraw(WETH))
+        .to.be.revertedWith("NoLongerPossible")
+    })
+  })
+
+  describe("Owner Functions", function () {
+    it("should allow owner to set Loop addresses", async function () {
+      await expect(prelaunchPoints.connect(owner).setLoopAddresses(lpETH, lpETHVault))
+        .to.emit(prelaunchPoints, "LoopAddressesUpdated")
+        .withArgs(lpETH.address, lpETHVault.address)
+    })
+
+    it("should not allow non-owner to set Loop addresses", async function () {
+      await expect(prelaunchPoints.connect(user1).setLoopAddresses(lpETH, lpETHVault))
+        .to.be.revertedWith("NotAuthorized")
+    })
+
+    it("should allow owner to add allowed tokens", async function () {
+      const newToken = await (await ethers.getContractFactory("MockToken")).deploy("New Token", "NT")
+      await prelaunchPoints.connect(owner).allowToken(newToken.address)
+      expect(await prelaunchPoints.isTokenAllowed(newToken.address)).to.be.true
+    })
+  })
+
+  describe("Vulnerabilities", function () {
+    it("should be vulnerable to front-running in convertAllETH", async function () {
+      const initialDeposit = ethers.parseEther("100")
+      const frontRunDeposit = ethers.parseEther("1000")
+
+      await prelaunchPoints.connect(user1).lockETH({ value: initialDeposit })
+      
+      // Simulate front-running
+      await prelaunchPoints.connect(attacker).lockETH({ value: frontRunDeposit })
+      
+      await prelaunchPoints.setLoopAddresses(lpETH, lpETHVault)
+      await time.increase(await prelaunchPoints.TIMELOCK())
+      await prelaunchPoints.convertAllETH()
+
+      const user1Balance = await prelaunchPoints.balances(user1.address, WETH)
+      const attackerBalance = await prelaunchPoints.balances(attacker.address, WETH)
+
+      expect(attackerBalance).to.be.gt(user1Balance.mul(9)) // Attacker gets disproportionately more
+    })
+
+    it("should result in zero claim for very small deposits due to precision loss", async function () {
+      const largeDeposit = ethers.parseEther("1000000")
+      const smallDeposit = ethers.parseEther("0.000001")
+
+      await prelaunchPoints.connect(user1).lockETH({ value: largeDeposit })
+      await prelaunchPoints.connect(user2).lockETH({ value: smallDeposit })
+
+      await prelaunchPoints.setLoopAddresses(lpETH, lpETHVault)
+      await time.increase(await prelaunchPoints.TIMELOCK())
+      await prelaunchPoints.convertAllETH()
+
+      await expect(prelaunchPoints.connect(user2).claim(WETH, 100, 0, "0x"))
+        .to.emit(prelaunchPoints, "Claimed")
+        .withArgs(user2.address, WETH, 0)
+    })
+
+    it("should allow setting zero address as proposed owner", async function () {
+      await expect(prelaunchPoints.connect(owner).proposeOwner(ethers.constants.AddressZero))
+        .to.not.be.reverted
+    })
   })
 
   tokens.forEach((token) => {
