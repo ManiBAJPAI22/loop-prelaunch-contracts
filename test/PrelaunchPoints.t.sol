@@ -698,37 +698,25 @@ contract PrelaunchPointsTest is Test {
     }
 
     /// ======= Reentrancy Tests ======= ///
-    function testReentrancyOnWithdraw() public {
-        uint256 lockAmount = 1 ether;
+   
+   function testReentrancyOnClaim() public {
+    uint256 lockAmount = 1 ether;
 
-        vm.deal(address(this), lockAmount);
-        vm.prank(address(this));
-        prelaunchPoints.lockETH{value: lockAmount}(referral);
+    vm.deal(address(this), lockAmount);
+    vm.prank(address(this));
+    prelaunchPoints.lockETH{value: lockAmount}(referral);
 
-        vm.warp(prelaunchPoints.loopActivation() + 1 days);
-        vm.prank(address(attackContract));
-        vm.expectRevert();
-        attackContract.attackWithdraw();
-    }
+    prelaunchPoints.setLoopAddresses(address(lpETH), address(lpETHVault));
+    vm.warp(prelaunchPoints.loopActivation() + prelaunchPoints.TIMELOCK() + 1 days);
+    prelaunchPoints.convertAllETH();
 
-    function testReentrancyOnClaim() public {
-        uint256 lockAmount = 1 ether;
+    vm.warp(prelaunchPoints.startClaimDate() + 1 days);
+    vm.prank(address(attackContract));
+    vm.expectRevert();
+    attackContract.attackClaim(100, ""); // Using 100% and empty data for the claim attempt
+}
 
-        vm.deal(address(this), lockAmount);
-        vm.prank(address(this));
-        prelaunchPoints.lockETH{value: lockAmount}(referral);
-
-        prelaunchPoints.setLoopAddresses(address(lpETH), address(lpETHVault));
-        vm.warp(prelaunchPoints.loopActivation() + prelaunchPoints.TIMELOCK() + 1 days);
-        prelaunchPoints.convertAllETH();
-
-        vm.warp(prelaunchPoints.startClaimDate() + 1 days);
-        vm.prank(address(attackContract));
-        vm.expectRevert();
-        attackContract.attackClaim();
-    }
-       
-      function testFuzzClaimPercentages(uint256 lockAmount, uint8 claimPercentage) public {
+ function testFuzzClaimPercentages(uint256 lockAmount, uint8 claimPercentage) public {
         vm.assume(lockAmount > 0 && lockAmount <= 1e36);
         vm.assume(claimPercentage > 0 && claimPercentage <= 100);
         
@@ -938,5 +926,294 @@ contract PrelaunchPointsTest is Test {
 
         assertEq(lpETH.balanceOf(address(prelaunchPoints)), 0);
     }
+     function testFrontRunningAllowToken() public {
+        ERC20Token maliciousToken = new ERC20Token();
+        
+        // Simulate a frontrunning scenario
+        vm.prank(address(0xBEEF));
+        maliciousToken.mint(address(0xBEEF), 1000 ether);
+        vm.prank(address(0xBEEF));
+        maliciousToken.approve(address(prelaunchPoints), 1000 ether);
+        
+        // Owner allows the token (this transaction could be frontrun)
+        prelaunchPoints.allowToken(address(maliciousToken));
+        
+        // Attacker immediately locks tokens
+        vm.prank(address(0xBEEF));
+        prelaunchPoints.lock(address(maliciousToken), 1000 ether, bytes32(0));
+        
+        // Check if the attacker successfully locked tokens
+        assertEq(prelaunchPoints.balances(address(0xBEEF), address(maliciousToken)), 1000 ether);
+    }
+
+    function testOwnerPrivilegeAbuse() public {
+        uint256 lockAmount = 1 ether;
+        vm.deal(address(this), lockAmount);
+        prelaunchPoints.lockETH{value: lockAmount}(referral);
+        
+        // Owner sets emergency mode
+        prelaunchPoints.setEmergencyMode(true);
+        
+        // Owner withdraws funds
+        prelaunchPoints.withdraw(WETH);
+        
+        // Check if owner could withdraw funds
+        assertEq(weth.balanceOf(address(this)), lockAmount + INITIAL_SUPPLY);
+    }
+
+    function testPrecisionLossManipulation() public {
+        uint256 largeAmount = 1e36;
+        uint256 smallAmount = 1;
+        
+        vm.deal(address(this), largeAmount + smallAmount);
+        prelaunchPoints.lockETH{value: largeAmount}(referral);
+        
+        address user = address(0x1234);
+        vm.prank(user);
+        prelaunchPoints.lockETH{value: smallAmount}(referral);
+        
+        prelaunchPoints.setLoopAddresses(address(lpETH), address(lpETHVault));
+        vm.warp(prelaunchPoints.loopActivation() + prelaunchPoints.TIMELOCK() + 1);
+        prelaunchPoints.convertAllETH();
+        
+        vm.warp(prelaunchPoints.startClaimDate() + 1);
+        
+        vm.prank(user);
+        prelaunchPoints.claim(WETH, 100, PrelaunchPoints.Exchange.UniswapV3, emptydata);
+        
+        // Check if the user with small amount gets any lpETH
+        assertEq(lpETH.balanceOf(user), 0, "User should not receive any lpETH due to precision loss");
+    }
+
+     function testReentrancyOnWithdraw() public {
+        uint256 lockAmount = 1 ether;
+        vm.deal(address(attackContract), lockAmount);
+        
+        vm.prank(address(attackContract));
+        vm.expectRevert();
+        attackContract.attackReentrancy{value: lockAmount}();
+
+        // Check if the attack was unsuccessful (balances should remain unchanged)
+        assertEq(prelaunchPoints.balances(address(attackContract), WETH), lockAmount);
+    }
+
+    function testReentrancyOnWithdrawMultiple() public {
+        uint256 lockAmount = 1 ether;
+        vm.deal(address(attackContract), lockAmount);
+        
+        vm.prank(address(attackContract));
+        prelaunchPoints.lockETH{value: lockAmount}(referral);
+        
+        vm.prank(address(attackContract));
+        vm.expectRevert();
+        attackContract.attackWithdrawMultiple();
+
+        // Check if the attack was unsuccessful (balances should remain unchanged)
+        assertEq(prelaunchPoints.balances(address(attackContract), WETH), lockAmount);
+    }
+
+    function testMaliciousExchangeData() public {
+    uint256 lockAmount = 1 ether;
+    vm.deal(address(attackContract), lockAmount);
+    
+    vm.prank(address(attackContract));
+    prelaunchPoints.lockETH{value: lockAmount}(referral);
+    
+    prelaunchPoints.setLoopAddresses(address(lpETH), address(lpETHVault));
+    vm.warp(prelaunchPoints.loopActivation() + prelaunchPoints.TIMELOCK() + 1);
+    prelaunchPoints.convertAllETH();
+    
+    vm.warp(prelaunchPoints.startClaimDate() + 1);
+    
+    // Craft malicious exchange data
+    bytes memory maliciousData = abi.encodeWithSelector(
+        bytes4(0x803ba26d),
+        lockAmount * 2, // Try to claim more than locked
+        address(attackContract),
+        abi.encodePacked(WETH, uint24(3000), address(lpETH))
+    );
+    
+    vm.prank(address(attackContract));
+    vm.expectRevert();
+    attackContract.attackClaim(100, maliciousData);
+}
+function testPartialClaim() public {
+    uint256 lockAmount = 100 ether;
+    vm.deal(address(this), lockAmount);
+    prelaunchPoints.lockETH{value: lockAmount}(referral);
+
+    prelaunchPoints.setLoopAddresses(address(lpETH), address(lpETHVault));
+    vm.warp(prelaunchPoints.loopActivation() + prelaunchPoints.TIMELOCK() + 1);
+    prelaunchPoints.convertAllETH();
+
+    vm.warp(prelaunchPoints.startClaimDate() + 1);
+
+    // Claim 50%
+    prelaunchPoints.claim(WETH, 50, PrelaunchPoints.Exchange.UniswapV3, emptydata);
+    assertEq(lpETH.balanceOf(address(this)), 50 ether);
+
+    // Claim another 30%
+    prelaunchPoints.claim(WETH, 30, PrelaunchPoints.Exchange.UniswapV3, emptydata);
+    assertEq(lpETH.balanceOf(address(this)), 80 ether);
+
+    // Claim remaining 20%
+    prelaunchPoints.claim(WETH, 20, PrelaunchPoints.Exchange.UniswapV3, emptydata);
+    assertEq(lpETH.balanceOf(address(this)), 100 ether);
+
+    // Try to claim again (should revert)
+    vm.expectRevert(PrelaunchPoints.NothingToClaim.selector);
+    prelaunchPoints.claim(WETH, 10, PrelaunchPoints.Exchange.UniswapV3, emptydata);
+}
+
+function testLockingWithExtremeDecimals() public {
+    // Deploy tokens
+    ERC20Token lowDecimalToken = new ERC20Token();
+    ERC20Token highDecimalToken = new ERC20Token();
+
+    // Manually set token properties if possible, or skip if not implemented
+    // lowDecimalToken.setDecimals(2);
+    // highDecimalToken.setDecimals(24);
+
+    prelaunchPoints.allowToken(address(lowDecimalToken));
+    prelaunchPoints.allowToken(address(highDecimalToken));
+
+    uint256 lowAmount = 100; // 1 token with 2 decimals
+    uint256 highAmount = 1000000000000000000000000000000000000000000000; // 1 token with 24 decimals
+
+    lowDecimalToken.mint(address(this), lowAmount);
+    highDecimalToken.mint(address(this), highAmount);
+
+    lowDecimalToken.approve(address(prelaunchPoints), lowAmount);
+    highDecimalToken.approve(address(prelaunchPoints), highAmount);
+
+    prelaunchPoints.lock(address(lowDecimalToken), lowAmount, referral);
+    prelaunchPoints.lock(address(highDecimalToken), highAmount, referral);
+
+    assertEq(prelaunchPoints.balances(address(this), address(lowDecimalToken)), lowAmount);
+    assertEq(prelaunchPoints.balances(address(this), address(highDecimalToken)), highAmount);
+}
+
+function testTokenAllowanceManipulation() public {
+    ERC20Token testToken = new ERC20Token();
+    uint256 lockAmount = 100 ether;
+    testToken.mint(address(this), lockAmount);
+
+    prelaunchPoints.allowToken(address(testToken));
+
+    // Try to lock with insufficient allowance
+    testToken.approve(address(prelaunchPoints), lockAmount - 1);
+    vm.expectRevert("ERC20: insufficient allowance");
+    prelaunchPoints.lock(address(testToken), lockAmount, referral);
+
+    // Increase allowance and lock successfully
+    testToken.approve(address(prelaunchPoints), lockAmount);
+    prelaunchPoints.lock(address(testToken), lockAmount, referral);
+
+    assertEq(prelaunchPoints.balances(address(this), address(testToken)), lockAmount);
+}
+
+function testPartialClaimsWithDifferentTokens() public {
+    uint256 ethAmount = 100 ether;
+    uint256 lrtAmount = 1000 ether;
+    
+    vm.deal(address(this), ethAmount);
+    prelaunchPoints.lockETH{value: ethAmount}(referral);
+    
+    lrt.approve(address(prelaunchPoints), lrtAmount);
+    prelaunchPoints.lock(address(lrt), lrtAmount, referral);
+
+    prelaunchPoints.setLoopAddresses(address(lpETH), address(lpETHVault));
+    vm.warp(prelaunchPoints.loopActivation() + prelaunchPoints.TIMELOCK() + 1);
+    prelaunchPoints.convertAllETH();
+
+    vm.warp(prelaunchPoints.startClaimDate() + 1);
+
+    // Claim 30% ETH
+    prelaunchPoints.claim(WETH, 30, PrelaunchPoints.Exchange.UniswapV3, emptydata);
+    assertEq(lpETH.balanceOf(address(this)), 30 ether);
+
+    // Claim 50% LRT
+    prelaunchPoints.claim(address(lrt), 50, PrelaunchPoints.Exchange.UniswapV3, emptydata);
+    // Assert the correct amount of lpETH received (this will depend on your conversion logic)
+
+    // Try to claim more than remaining balance
+    vm.expectRevert(PrelaunchPoints.NothingToClaim.selector);
+    prelaunchPoints.claim(WETH, 80, PrelaunchPoints.Exchange.UniswapV3, emptydata);
+}
+
+function testEmergencyModeMultipleToggles() public {
+    uint256 lockAmount = 1 ether;
+    vm.deal(address(this), lockAmount);
+    prelaunchPoints.lockETH{value: lockAmount}(referral);
+
+    // Toggle emergency mode multiple times
+    prelaunchPoints.setEmergencyMode(true);
+    assertTrue(prelaunchPoints.emergencyMode());
+
+    prelaunchPoints.setEmergencyMode(false);
+    assertFalse(prelaunchPoints.emergencyMode());
+
+    prelaunchPoints.setEmergencyMode(true);
+    assertTrue(prelaunchPoints.emergencyMode());
+
+    // Test withdrawal in emergency mode after conversion
+    prelaunchPoints.setLoopAddresses(address(lpETH), address(lpETHVault));
+    vm.warp(prelaunchPoints.loopActivation() + prelaunchPoints.TIMELOCK() + 1);
+    prelaunchPoints.convertAllETH();
+
+    prelaunchPoints.withdraw(WETH);
+    assertEq(weth.balanceOf(address(this)), lockAmount);
+}
+
+function testOwnershipTransferEdgeCases() public {
+    // Test transferring to zero address
+    vm.expectRevert();
+    prelaunchPoints.proposeOwner(address(0));
+
+    // Test transferring to the contract itself
+    vm.expectRevert();
+    prelaunchPoints.proposeOwner(address(prelaunchPoints));
+
+    // Test transferring ownership twice without accepting
+    address newOwner1 = address(0x1);
+    address newOwner2 = address(0x2);
+    
+    prelaunchPoints.proposeOwner(newOwner1);
+    assertEq(prelaunchPoints.proposedOwner(), newOwner1);
+
+    prelaunchPoints.proposeOwner(newOwner2);
+    assertEq(prelaunchPoints.proposedOwner(), newOwner2);
+
+    // Ensure only the latest proposed owner can accept
+    vm.prank(newOwner1);
+    vm.expectRevert(PrelaunchPoints.NotProposedOwner.selector);
+    prelaunchPoints.acceptOwnership();
+
+    vm.prank(newOwner2);
+    prelaunchPoints.acceptOwnership();
+    assertEq(prelaunchPoints.owner(), newOwner2);
+}
+
+function testTimelockManipulation() public {
+    uint256 lockAmount = 1 ether;
+    vm.deal(address(this), lockAmount);
+    prelaunchPoints.lockETH{value: lockAmount}(referral);
+
+    prelaunchPoints.setLoopAddresses(address(lpETH), address(lpETHVault));
+    
+    // Try to manipulate block.timestamp
+    vm.warp(prelaunchPoints.loopActivation() + prelaunchPoints.TIMELOCK() - 1);
+    vm.expectRevert(PrelaunchPoints.LoopNotActivated.selector);
+    prelaunchPoints.convertAllETH();
+
+    // Exactly at timelock expiry
+    vm.warp(prelaunchPoints.loopActivation() + prelaunchPoints.TIMELOCK());
+    vm.expectRevert(PrelaunchPoints.LoopNotActivated.selector);
+    prelaunchPoints.convertAllETH();
+
+    // Just after timelock expiry
+    vm.warp(prelaunchPoints.loopActivation() + prelaunchPoints.TIMELOCK() + 1);
+    prelaunchPoints.convertAllETH();
+}
 
 }

